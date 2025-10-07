@@ -10,6 +10,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 import asyncio
 import os
+
 # Импорты проекта
 try:
     from .weather_client import WeatherDataClient
@@ -30,8 +31,15 @@ logger = logging.getLogger(__name__)
 # Настройки панели
 PANEL_AREA = 1.6        # м², площадь одной панели
 PANEL_EFFICIENCY = 0.18 # КПД панели
-NUM_PANELS = 5         # Количество панелей в системе
-POWER_THRESHOLD = 50   # Вт, порог для уведомлений
+NUM_PANELS = 5          # Количество панелей в системе
+
+# Пороги уведомлений
+POWER_THRESHOLD_HIGH = 50   # Вт, высокий уровень мощности
+POWER_THRESHOLD_LOW = 10    # Вт, низкий уровень мощности
+POWER_DELTA_THRESHOLD = 50  # Вт, резкий скачок
+
+# Словарь последних уведомлений
+NOTIFIED_EVENTS = {}
 
 class MLSolarForecaster:
     def __init__(self):
@@ -96,24 +104,40 @@ class MLSolarForecaster:
             raise
 
     async def _notify_power(self, power_list: List[float]):
-        """Отправка уведомлений через WebSocket при превышении порога мощности"""
+        """Отправка уведомлений через WebSocket при превышении порога, низкой мощности или резком скачке"""
         max_power = max(power_list, default=0)
+        min_power = min(power_list, default=0)
+        delta_power = max_power - min_power
         print(f"🔋 Максимальная мощность системы: {max_power:.2f} Вт")
-        if max_power > POWER_THRESHOLD:
-            async def notify():
-                print("📡 Попытка отправки уведомлений WebSocket...")
-                for connection in active_connections:
-                    try:
-                        print(f"🔹 Отправка уведомления на {connection}...")
-                        await connection.send_text(
-                            f"⚡ Внимание! Прогноз мощности системы: {max_power:.2f} Вт"
-                        )
-                        print("✅ Уведомление отправлено успешно")
-                    except Exception as e:
-                        print(f"❌ Ошибка при отправке уведомления: {e}")
-                        active_connections.remove(connection)
-            asyncio.create_task(notify())
 
+        async def notify_event(message: str, event_type: str):
+            """Отправка уведомления через WebSocket только один раз за событие"""
+            if NOTIFIED_EVENTS.get(event_type) == message:
+                return
+            NOTIFIED_EVENTS[event_type] = message
+            print(f"📡 Отправка уведомления: {message}")
+            for connection in active_connections:
+                try:
+                    await connection.send_text(message)
+                except Exception as e:
+                    print(f"❌ Ошибка при отправке уведомления: {e}")
+                    active_connections.remove(connection)
+
+        tasks = []
+
+        # Высокая мощность
+        if max_power > POWER_THRESHOLD_HIGH:
+            tasks.append(notify_event(f"⚡ Внимание! Прогноз мощности системы: {max_power:.2f} Вт", "high_power"))
+
+        # Низкая мощность
+        if min_power < POWER_THRESHOLD_LOW:
+            tasks.append(notify_event(f"⚠️ Предупреждение! Прогноз низкой мощности: {min_power:.2f} Вт", "low_power"))
+
+        # Резкий скачок мощности
+        if delta_power > POWER_DELTA_THRESHOLD:
+            tasks.append(notify_event(f"⚡ Резкий скачок мощности: Δ{delta_power:.2f} Вт", "power_spike"))
+
+        await asyncio.gather(*tasks)
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -207,8 +231,7 @@ class MLSolarForecaster:
         except:
             return ForecastMetrics()
 
-    def _prepare_ml_plot_data(self, historical_df: pd.DataFrame, forecast_df: pd.DataFrame, predictions: Dict) -> List[
-        PlotData]:
+    def _prepare_ml_plot_data(self, historical_df: pd.DataFrame, forecast_df: pd.DataFrame, predictions: Dict) -> List[PlotData]:
         try:
             historical_last_48h = historical_df.tail(48)
             plot_data_list = []
@@ -262,7 +285,6 @@ class MLSolarForecaster:
                 layout = {
                     "title": f"{title}",
                     "xaxis": {"title": "Время"},
-                    # Добавлены единицы измерения
                     "yaxis": {"title": f"{title} ({units.get(title, '')})"},
                     "height": 400,
                     "showlegend": True,
@@ -281,18 +303,12 @@ class MLSolarForecaster:
     def export_to_excel(self, forecast_response: 'ForecastResponse', filename: str = None) -> str:
         """
         Экспорт исторических и прогнозных данных в Excel.
-
-        :param forecast_response: ForecastResponse объект, который вернул generate_forecast
-        :param filename: имя файла Excel (по умолчанию "solar_forecast.xlsx")
-        :return: путь к созданному файлу
         """
         try:
             if filename is None:
                 filename = f"solar_forecast_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-            # Создаем Excel writer
             with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-
                 # Исторические данные
                 historical_df = pd.DataFrame([{
                     'datetime': h.datetime,
