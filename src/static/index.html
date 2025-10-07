@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Прогноз солнечной инсоляции</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+    color: #333;
+}
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+.header {
+    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+.header h1 { font-size: 2.5em; margin-bottom: 10px; font-weight: 300; }
+.content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    padding: 30px;
+}
+@media (max-width: 1024px) { .content { grid-template-columns: 1fr; } }
+.map-section, .chart-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid #e9ecef;
+}
+.section-title {
+    font-size: 1.4em;
+    color: #2c3e50;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #3498db;
+}
+#map { height: 400px; border-radius: 8px; border: 2px solid #bdc3c7; }
+#plot-container {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid #ddd;
+}
+.tabs {
+    display: flex;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #3498db;
+    overflow-x: auto;
+}
+.tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    background: #eee;
+    margin-right: 5px;
+    border-radius: 5px 5px 0 0;
+    font-weight: bold;
+    color: #2c3e50;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.tab.active { background: #3498db; color: white; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.chart-box { margin-bottom: 40px; border: 1px solid #ddd; border-radius: 10px; padding: 10px; background: #fff; }
+.coordinates-info { background: #e8f4fc; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #3498db; }
+.loading { display: none; text-align: center; padding: 20px; color: #7f8c8d; }
+.loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.error-message { display: none; background: #e74c3c; color: white; padding: 15px; border-radius: 8px; margin: 15px 0; text-align: center; }
+.debug-info { background: #2c3e50; color: white; padding: 10px; border-radius: 5px; margin-top: 10px; font-family: monospace; font-size: 12px; max-height: 150px; overflow-y: auto; }
+#notifications { position: fixed; top: 20px; right: 20px; width: 300px; z-index: 1000; }
+.notification {
+    background: #f1c40f;
+    color: #2c3e50;
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    opacity: 0;
+    transform: translateX(100%);
+    animation: slideIn 0.5s forwards, fadeOut 0.5s forwards 4.5s;
+}
+@keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+@keyframes fadeOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🌞 Прогноз данных по выбранным координатам</h1>
+        <p>Выберите локацию на карте для получения прогноза</p>
+    </div>
+
+    <div class="content">
+        <div class="map-section">
+            <h2 class="section-title">🗺️ Выбор локации</h2>
+            <div id="map"> </div>
+            <div class="coordinates-info">
+                <h3>📡 Информация о точке</h3>
+                <p><strong>Широта:</strong> <span id="lat-value">-</span></p>
+                <p><strong>Долгота:</strong> <span id="lng-value">-</span></p>
+                <p><strong>Статус:</strong> <span id="status">Выберите точку на карте</span></p>
+            </div>
+            <div class="debug-info"><strong>Отладка:</strong><div id="debug-output">Ждем действия...</div></div>
+        </div>
+
+        <div class="chart-section">
+            <h2 class="section-title">📊 Графики прогнозов</h2>
+            <div class="loading" id="loading"><div class="loading-spinner"></div><p>Загружаем данные и строим прогноз...</p></div>
+            <div class="error-message" id="error-message">Произошла ошибка при загрузке данных</div>
+
+            <div class="tabs" id="tabs"></div>
+            <div id="plot-container"></div>
+
+            <button id="export-btn" style="margin-top: 15px; padding: 10px 20px; font-weight: bold;">💾 Скачать Excel</button>
+        </div>
+    </div>
+</div>
+
+<div id="notifications"></div>
+
+<script>
+function debugLog(message) {
+    const debugOutput = document.getElementById('debug-output');
+    const timestamp = new Date().toLocaleTimeString();
+    debugOutput.innerHTML = `[${timestamp}] ${message}<br>` + debugOutput.innerHTML;
+    console.log(`[DEBUG] ${message}`);
+}
+
+// --- WebSocket ---
+const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/ws/solar`);
+ws.onopen = () => debugLog("✅ WebSocket подключен");
+ws.onmessage = function(event){
+    debugLog(`📨 Получено сообщение WebSocket: ${event.data}`);
+    try { showNotification(event.data); } catch (err) { debugLog(`❌ Ошибка отображения уведомления: ${err.message}`); }
+};
+ws.onclose = (event) => debugLog(`⚠ WebSocket закрыт (код: ${event.code})`);
+ws.onerror = (e) => debugLog("❌ WebSocket ошибка: " + e);
+
+function showNotification(message) {
+    if (!message) return;
+    const container = document.getElementById('notifications');
+    const notif = document.createElement('div');
+    notif.className = 'notification';
+    notif.textContent = message;
+    container.appendChild(notif);
+    setTimeout(()=>{ container.removeChild(notif); },5000);
+}
+
+// --- Map ---
+const map = L.map('map').setView([55.7558, 37.6173], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+
+let marker = null;
+let currentLatLng = null;
+const loadingElement = document.getElementById('loading');
+const errorElement = document.getElementById('error-message');
+const plotContainer = document.getElementById('plot-container');
+const tabsContainer = document.getElementById('tabs');
+const latValue = document.getElementById('lat-value');
+const lngValue = document.getElementById('lng-value');
+const statusElement = document.getElementById('status');
+
+function showLoading() { loadingElement.style.display = 'block'; errorElement.style.display = 'none'; }
+function hideLoading() { loadingElement.style.display = 'none'; }
+function showError(message) { errorElement.style.display = 'block'; errorElement.textContent = message; statusElement.textContent = 'Ошибка загрузки'; statusElement.style.color = '#e74c3c'; }
+
+// --- Render plots ---
+function renderMultiplePlots(plotArray) {
+    try {
+        if (!Array.isArray(plotArray) || plotArray.length === 0) throw new Error("Нет данных для графиков");
+        plotContainer.innerHTML = ""; tabsContainer.innerHTML = "";
+
+        plotArray.forEach((plotData, index) => {
+            const tabButton = document.createElement('div');
+            tabButton.className = 'tab';
+            tabButton.textContent = plotData.layout.title || `График ${index+1}`;
+            tabButton.dataset.index = index;
+            tabsContainer.appendChild(tabButton);
+
+            const chartBox = document.createElement('div');
+            chartBox.className = 'chart-box tab-content';
+            chartBox.id = `plotly-graph-${index}`;
+            plotContainer.appendChild(chartBox);
+
+            Plotly.newPlot(chartBox.id, plotData.traces, plotData.layout, { responsive: true, displayModeBar: true, displaylogo: false })
+            .then(()=>debugLog(`✅ График "${tabButton.textContent}" построен`))
+            .catch(err=>debugLog(`❌ Ошибка построения графика "${tabButton.textContent}": ${err.message}`));
+
+            tabButton.addEventListener('click', ()=>{
+                document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+                tabButton.classList.add('active'); chartBox.classList.add('active');
+            });
+        });
+
+        const firstTab = document.querySelector('.tab'); if(firstTab) firstTab.click();
+        statusElement.textContent = 'Графики построены'; statusElement.style.color = '#27ae60';
+    } catch (error) {
+        plotContainer.innerHTML = `<div style="text-align:center;padding:50px;color:#e74c3c;">
+            <h3>❌ Ошибка построения графиков</h3><p>${error.message}</p></div>`;
+        debugLog(`❌ Ошибка рендеринга графиков: ${error.message}`);
+    }
+}
+
+// --- Export Excel ---
+document.getElementById('export-btn').addEventListener('click', ()=>{
+    if(!currentLatLng){ alert("Сначала выберите точку на карте!"); return; }
+
+    fetch(`/api/v1/forecast/export`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ latitude: currentLatLng.lat, longitude: currentLatLng.lng })
+    })
+    .then(r=>{ if(!r.ok) throw new Error(`Ошибка запроса: ${r.status}`); return r.blob(); })
+    .then(blob=>{
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `solar_forecast_${currentLatLng.lat}_${currentLatLng.lng}.xlsx`;
+        document.body.appendChild(a); a.click(); a.remove();
+        window.URL.revokeObjectURL(url);
+    })
+    .catch(err=>{ console.error(err); alert("❌ Ошибка при скачивании Excel: "+err.message); });
+});
+
+// --- Map click ---
+function onMapClick(e){
+    currentLatLng = e.latlng;
+    if(marker) map.removeLayer(marker);
+    marker = L.marker(currentLatLng).addTo(map);
+    latValue.textContent = currentLatLng.lat.toFixed(4);
+    lngValue.textContent = currentLatLng.lng.toFixed(4);
+    statusElement.textContent = 'Загружаем данные...'; statusElement.style.color = '#e67e22';
+    showLoading();
+    debugLog(`📡 Запрос прогнозов: ${currentLatLng.lat}, ${currentLatLng.lng}`);
+
+    fetch('/api/v1/forecast',{
+        method:'POST',
+        headers:{ 'Content-Type':'application/json','Accept':'application/json' },
+        body: JSON.stringify({ latitude: currentLatLng.lat, longitude: currentLatLng.lng })
+    })
+    .then(r=>{
+        debugLog(`Ответ API: ${r.status} ${r.statusText}`);
+        if(!r.ok) throw new Error(`HTTP ошибка ${r.status}`);
+        return r.json();
+    })
+    .then(data=>{
+        hideLoading();
+        if(!data.plot_data || !Array.isArray(data.plot_data)) throw new Error("Нет корректных данных для графиков");
+        debugLog(`Получено графиков: ${data.plot_data.length}`);
+        renderMultiplePlots(data.plot_data);
+    })
+    .catch(error=>{
+        hideLoading();
+        showError(error.message);
+        plotContainer.innerHTML = `<div style="text-align:center;padding:50px;color:#e74c3c;">
+            <h3>❌ Ошибка загрузки</h3><p>${error.message}</p></div>`;
+        debugLog(`❌ Ошибка запроса: ${error.message}`);
+    });
+}
+
+map.on('click', onMapClick);
+debugLog("✅ Приложение готово к работе");
+</script>
+</body>
+</html>
