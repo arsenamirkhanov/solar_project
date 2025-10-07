@@ -1,284 +1,388 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Прогноз солнечной инсоляции</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>🌞 Solar Forecast — тёмная тема</title>
+
+<!-- Tailwind Play CDN (для быстрого прототипа, для продакшена лучше собрать Tailwind) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Plotly -->
 <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    padding: 20px;
-    color: #333;
-}
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-    background: white;
-    border-radius: 15px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-    overflow: hidden;
-}
-.header {
-    background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-    color: white;
-    padding: 30px;
-    text-align: center;
-}
-.header h1 { font-size: 2.5em; margin-bottom: 10px; font-weight: 300; }
-.content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    padding: 30px;
-}
-@media (max-width: 1024px) { .content { grid-template-columns: 1fr; } }
-.map-section, .chart-section {
-    background: #f8f9fa;
-    border-radius: 10px;
-    padding: 20px;
-    border: 1px solid #e9ecef;
-}
-.section-title {
-    font-size: 1.4em;
-    color: #2c3e50;
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #3498db;
-}
-#map { height: 400px; border-radius: 8px; border: 2px solid #bdc3c7; }
-#plot-container {
-    background: white;
-    border-radius: 8px;
-    padding: 15px;
-    border: 1px solid #ddd;
-}
-.tabs {
-    display: flex;
-    margin-bottom: 15px;
-    border-bottom: 2px solid #3498db;
-    overflow-x: auto;
-}
-.tab {
-    padding: 10px 20px;
-    cursor: pointer;
-    background: #eee;
-    margin-right: 5px;
-    border-radius: 5px 5px 0 0;
-    font-weight: bold;
-    color: #2c3e50;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-.tab.active { background: #3498db; color: white; }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-.chart-box { margin-bottom: 40px; border: 1px solid #ddd; border-radius: 10px; padding: 10px; background: #fff; }
-.coordinates-info { background: #e8f4fc; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #3498db; }
-.loading { display: none; text-align: center; padding: 20px; color: #7f8c8d; }
-.loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-.error-message { display: none; background: #e74c3c; color: white; padding: 15px; border-radius: 8px; margin: 15px 0; text-align: center; }
-.debug-info { background: #2c3e50; color: white; padding: 10px; border-radius: 5px; margin-top: 10px; font-family: monospace; font-size: 12px; max-height: 150px; overflow-y: auto; }
-#notifications { position: fixed; top: 20px; right: 20px; width: 300px; z-index: 1000; }
-.notification {
-    background: #f1c40f;
-    color: #2c3e50;
-    padding: 10px 15px;
-    margin-bottom: 10px;
-    border-radius: 5px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-    opacity: 0;
-    transform: translateX(100%);
-    animation: slideIn 0.5s forwards, fadeOut 0.5s forwards 4.5s;
-}
-@keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
-@keyframes fadeOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+html,body,#app { height: 100%; }
+/* дополнительные стили для оформления тултипов/уведомлений */
+.toast-enter { transform: translateY(-8px); opacity: 0; }
+.toast-enter-active { transform: translateY(0); opacity: 1; transition: all .28s ease; }
+.toast-exit { opacity: 1; }
+.toast-exit-active { opacity: 0; transition: opacity .28s ease; }
+/* Ограничиваем максимальную высоту панели отладки */
+#debug-output { max-height: 180px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Segoe UI Mono", monospace; font-size: 12px; }
 </style>
 </head>
-<body>
-<div class="container">
-    <div class="header">
-        <h1>🌞 Прогноз данных по выбранным координатам</h1>
-        <p>Выберите локацию на карте для получения прогноза</p>
+<body class="bg-gradient-to-br from-gray-900 via-slate-900 to-black text-slate-100">
+<div id="app" class="min-h-screen p-6">
+
+  <header class="max-w-7xl mx-auto mb-6">
+    <div class="flex items-center justify-between gap-6">
+      <div>
+        <h1 class="text-3xl font-extralight">🌞 <span class="font-medium">Solar Insolation Forecast</span></h1>
+        <p class="text-slate-400 mt-1">Выберите точку на карте — получайте историю, ML-прогноз, скачивайте Excel и получайте уведомления.</p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button id="export-btn" class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm font-medium shadow">
+          💾 Скачать Excel
+        </button>
+        <div id="status-badge" class="px-3 py-2 rounded bg-slate-800 text-slate-300 text-sm">Статус: ожидание</div>
+      </div>
     </div>
+  </header>
 
-    <div class="content">
-        <div class="map-section">
-            <h2 class="section-title">🗺️ Выбор локации</h2>
-            <div id="map"> </div>
-            <div class="coordinates-info">
-                <h3>📡 Информация о точке</h3>
-                <p><strong>Широта:</strong> <span id="lat-value">-</span></p>
-                <p><strong>Долгота:</strong> <span id="lng-value">-</span></p>
-                <p><strong>Статус:</strong> <span id="status">Выберите точку на карте</span></p>
-            </div>
-            <div class="debug-info"><strong>Отладка:</strong><div id="debug-output">Ждем действия...</div></div>
+  <main class="max-w-7xl mx-auto grid grid-cols-12 gap-6">
+    <!-- Map + info -->
+    <section class="col-span-12 lg:col-span-5 bg-slate-800 rounded-lg p-4 border border-slate-700 shadow-inner">
+      <h2 class="text-lg font-medium mb-3 text-slate-100">🗺️ Выбор локации</h2>
+      <div id="map" class="w-full h-96 rounded-md border border-slate-700"></div>
+
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="bg-slate-900 p-3 rounded border border-slate-700">
+          <div class="text-xs text-slate-400">Широта</div>
+          <div id="lat-value" class="text-lg font-medium">-</div>
         </div>
-
-        <div class="chart-section">
-            <h2 class="section-title">📊 Графики прогнозов</h2>
-            <div class="loading" id="loading"><div class="loading-spinner"></div><p>Загружаем данные и строим прогноз...</p></div>
-            <div class="error-message" id="error-message">Произошла ошибка при загрузке данных</div>
-
-            <div class="tabs" id="tabs"></div>
-            <div id="plot-container"></div>
-
-            <button id="export-btn" style="margin-top: 15px; padding: 10px 20px; font-weight: bold;">💾 Скачать Excel</button>
+        <div class="bg-slate-900 p-3 rounded border border-slate-700">
+          <div class="text-xs text-slate-400">Долгота</div>
+          <div id="lng-value" class="text-lg font-medium">-</div>
         </div>
-    </div>
+      </div>
+
+      <div class="mt-4 bg-slate-900 p-3 rounded border border-slate-700">
+        <div class="text-xs text-slate-400">Статус</div>
+        <div id="status" class="text-sm">Выберите точку на карте</div>
+      </div>
+
+      <div class="mt-4 bg-slate-900 p-3 rounded border border-slate-700">
+        <div class="text-xs text-slate-400">Отладка</div>
+        <div id="debug-output" class="mt-2 text-slate-200">Ждем действия...</div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="col-span-12 lg:col-span-7 bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-medium">📊 Графики прогнозов</h2>
+        <div class="text-sm text-slate-400">Показаны: последние 48 ч + прогноз</div>
+      </div>
+
+      <div id="loading" class="hidden mb-4">
+        <div class="flex items-center gap-3 px-3 py-2 rounded bg-slate-900 border border-slate-700">
+          <div class="w-6 h-6 border-4 border-t-4 border-slate-600 rounded-full animate-spin"></div>
+          <div class="text-slate-300">Загружаем данные и строим прогноз...</div>
+        </div>
+      </div>
+
+      <div id="error-message" class="hidden mb-4 text-sm bg-rose-900 text-rose-100 px-3 py-2 rounded border border-rose-700"></div>
+
+      <!-- Tabs -->
+      <div id="tabs" class="flex gap-2 overflow-x-auto pb-2 mb-4 border-b border-slate-700"></div>
+
+      <!-- Plot container -->
+      <div id="plot-container" class="space-y-6"></div>
+    </section>
+  </main>
+
+  <!-- Toast notifications -->
+  <div id="toasts" class="fixed top-6 right-6 w-80 space-y-3 z-50"></div>
+
+  <!-- Footer small -->
+  <footer class="max-w-7xl mx-auto mt-8 text-slate-500 text-sm">
+    <div>Backend: <code class="bg-slate-900 px-2 py-0.5 rounded">/api/v1/forecast</code>, WebSocket: <code class="bg-slate-900 px-2 py-0.5 rounded">/api/v1/ws/solar</code></div>
+  </footer>
 </div>
 
-<div id="notifications"></div>
-
 <script>
-function debugLog(message) {
-    const debugOutput = document.getElementById('debug-output');
-    const timestamp = new Date().toLocaleTimeString();
-    debugOutput.innerHTML = `[${timestamp}] ${message}<br>` + debugOutput.innerHTML;
-    console.log(`[DEBUG] ${message}`);
+/* ========= Утилиты и UI helpers ========= */
+function debugLog(msg) {
+  const out = document.getElementById('debug-output');
+  const ts = new Date().toLocaleTimeString();
+  out.innerHTML = '['+ts+'] ' + msg + '<br>' + out.innerHTML;
+  console.log('[DEBUG]', msg);
 }
 
-// --- WebSocket ---
-const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/ws/solar`);
-ws.onopen = () => debugLog("✅ WebSocket подключен");
-ws.onmessage = function(event){
-    debugLog(`📨 Получено сообщение WebSocket: ${event.data}`);
-    try { showNotification(event.data); } catch (err) { debugLog(`❌ Ошибка отображения уведомления: ${err.message}`); }
-};
-ws.onclose = (event) => debugLog(`⚠ WebSocket закрыт (код: ${event.code})`);
-ws.onerror = (e) => debugLog("❌ WebSocket ошибка: " + e);
-
-function showNotification(message) {
-    if (!message) return;
-    const container = document.getElementById('notifications');
-    const notif = document.createElement('div');
-    notif.className = 'notification';
-    notif.textContent = message;
-    container.appendChild(notif);
-    setTimeout(()=>{ container.removeChild(notif); },5000);
+function showToast(message, level='info', timeout=4500) {
+  const container = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'rounded p-3 shadow-lg border ' + (level==='error' ? 'bg-rose-600 border-rose-700 text-white' : (level==='warn' ? 'bg-amber-600 border-amber-700 text-slate-900' : 'bg-slate-900 border-slate-700 text-slate-100'));
+  t.textContent = message;
+  container.appendChild(t);
+  setTimeout(()=>{ t.classList.add('fade'); try{ container.removeChild(t);}catch(e){} }, timeout);
 }
 
-// --- Map ---
+/* ========= WebSocket with reconnection ========= */
+let ws = null;
+let wsRetry = 0;
+function connectWS() {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${scheme}://${location.host}/api/v1/ws/solar`;
+  debugLog('Попытка подключения к WebSocket...');
+  try {
+    ws = new WebSocket(url);
+  } catch (e) {
+    debugLog('Ошибка создания WebSocket: ' + e.message);
+    scheduleReconnect();
+    return;
+  }
+
+  ws.addEventListener('open', () => {
+    debugLog('✅ WebSocket подключен');
+    wsRetry = 0;
+    showToast('WebSocket подключен', 'info', 2000);
+    const statusBadge = document.getElementById('status-badge');
+    statusBadge.textContent = 'Статус: WS подключен';
+    statusBadge.classList.remove('bg-red-800'); statusBadge.classList.add('bg-slate-800');
+  });
+
+  ws.addEventListener('message', (ev) => {
+    debugLog('📨 WS: ' + ev.data);
+    showToast(ev.data, 'warn', 6000);
+  });
+
+  ws.addEventListener('close', (ev) => {
+    debugLog(`⚠ WebSocket закрыт (код=${ev.code})`);
+    scheduleReconnect();
+  });
+
+  ws.addEventListener('error', (ev) => {
+    debugLog('❌ WebSocket ошибка: ' + String(ev));
+    try { ws.close(); } catch(e){}
+    scheduleReconnect();
+  });
+}
+
+function scheduleReconnect() {
+  wsRetry++;
+  const wait = Math.min(30000, 1000 * Math.pow(1.8, wsRetry)); // экспоненциальная задержка
+  debugLog(`Попытка переподключения через ${Math.round(wait/1000)} с...`);
+  const statusBadge = document.getElementById('status-badge');
+  statusBadge.textContent = 'Статус: WS отключен — переподключение...';
+  statusBadge.classList.add('bg-red-800');
+  setTimeout(connectWS, wait);
+}
+
+// стартуем ws
+connectWS();
+
+/* ========= Map init ========= */
 const map = L.map('map').setView([55.7558, 37.6173], 5);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
 
 let marker = null;
 let currentLatLng = null;
-const loadingElement = document.getElementById('loading');
-const errorElement = document.getElementById('error-message');
+
+map.on('click', onMapClick);
+
+/* ========= DOM references ========= */
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error-message');
 const plotContainer = document.getElementById('plot-container');
 const tabsContainer = document.getElementById('tabs');
 const latValue = document.getElementById('lat-value');
 const lngValue = document.getElementById('lng-value');
-const statusElement = document.getElementById('status');
+const statusEl = document.getElementById('status');
+const exportBtn = document.getElementById('export-btn');
 
-function showLoading() { loadingElement.style.display = 'block'; errorElement.style.display = 'none'; }
-function hideLoading() { loadingElement.style.display = 'none'; }
-function showError(message) { errorElement.style.display = 'block'; errorElement.textContent = message; statusElement.textContent = 'Ошибка загрузки'; statusElement.style.color = '#e74c3c'; }
-
-// --- Render plots ---
-function renderMultiplePlots(plotArray) {
-    try {
-        if (!Array.isArray(plotArray) || plotArray.length === 0) throw new Error("Нет данных для графиков");
-        plotContainer.innerHTML = ""; tabsContainer.innerHTML = "";
-
-        plotArray.forEach((plotData, index) => {
-            const tabButton = document.createElement('div');
-            tabButton.className = 'tab';
-            tabButton.textContent = plotData.layout.title || `График ${index+1}`;
-            tabButton.dataset.index = index;
-            tabsContainer.appendChild(tabButton);
-
-            const chartBox = document.createElement('div');
-            chartBox.className = 'chart-box tab-content';
-            chartBox.id = `plotly-graph-${index}`;
-            plotContainer.appendChild(chartBox);
-
-            Plotly.newPlot(chartBox.id, plotData.traces, plotData.layout, { responsive: true, displayModeBar: true, displaylogo: false })
-            .then(()=>debugLog(`✅ График "${tabButton.textContent}" построен`))
-            .catch(err=>debugLog(`❌ Ошибка построения графика "${tabButton.textContent}": ${err.message}`));
-
-            tabButton.addEventListener('click', ()=>{
-                document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
-                tabButton.classList.add('active'); chartBox.classList.add('active');
-            });
-        });
-
-        const firstTab = document.querySelector('.tab'); if(firstTab) firstTab.click();
-        statusElement.textContent = 'Графики построены'; statusElement.style.color = '#27ae60';
-    } catch (error) {
-        plotContainer.innerHTML = `<div style="text-align:center;padding:50px;color:#e74c3c;">
-            <h3>❌ Ошибка построения графиков</h3><p>${error.message}</p></div>`;
-        debugLog(`❌ Ошибка рендеринга графиков: ${error.message}`);
-    }
+/* ========= Plot helpers ========= */
+function safeTitleFromLayout(layoutTitle) {
+  // если есть двоеточие, берем часть после него, иначе всю строку
+  if (!layoutTitle && layoutTitle !== '') return 'График';
+  if (typeof layoutTitle !== 'string') return String(layoutTitle);
+  const idx = layoutTitle.indexOf(':');
+  return idx >= 0 ? layoutTitle.slice(idx + 1).trim() : layoutTitle;
 }
 
-// --- Export Excel ---
-document.getElementById('export-btn').addEventListener('click', ()=>{
-    if(!currentLatLng){ alert("Сначала выберите точку на карте!"); return; }
+function clearPlots() {
+  plotContainer.innerHTML = '';
+  tabsContainer.innerHTML = '';
+}
 
-    fetch(`/api/v1/forecast/export`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ latitude: currentLatLng.lat, longitude: currentLatLng.lng })
-    })
-    .then(r=>{ if(!r.ok) throw new Error(`Ошибка запроса: ${r.status}`); return r.blob(); })
-    .then(blob=>{
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `solar_forecast_${currentLatLng.lat}_${currentLatLng.lng}.xlsx`;
-        document.body.appendChild(a); a.click(); a.remove();
-        window.URL.revokeObjectURL(url);
-    })
-    .catch(err=>{ console.error(err); alert("❌ Ошибка при скачивании Excel: "+err.message); });
+function renderMultiplePlots(plotArray) {
+  try {
+    if (!Array.isArray(plotArray) || plotArray.length === 0) throw new Error('Нет данных для графиков');
+    clearPlots();
+
+    plotArray.forEach((plotData, index) => {
+      const rawTitle = (plotData && plotData.layout && plotData.layout.title) ? plotData.layout.title : (`График ${index+1}`);
+      const title = safeTitleFromLayout(rawTitle);
+
+      // tab button
+      const tab = document.createElement('button');
+      tab.className = 'tab px-3 py-1 rounded-t-md bg-slate-700 hover:bg-slate-600 text-sm';
+      tab.textContent = title;
+      tab.dataset.index = index;
+      tabsContainer.appendChild(tab);
+
+      // chart box
+      const box = document.createElement('div');
+      box.className = 'chart-box tab-content hidden bg-slate-900 p-3 rounded border border-slate-700';
+      box.id = `plotly-graph-${index}`;
+      plotContainer.appendChild(box);
+
+      // create plot
+      try {
+        Plotly.newPlot(box.id, plotData.traces, plotData.layout, { responsive: true, displayModeBar: true, displaylogo: false })
+          .then(() => {
+            debugLog(`✅ График "${title}" построен`);
+          })
+          .catch(err => {
+            debugLog(`❌ Ошибка Plotly для "${title}": ${err.message || err}`);
+          });
+      } catch (e) {
+        debugLog('❌ Исключение при построении графика: ' + e.message);
+      }
+
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('bg-emerald-500', 'text-black'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        tab.classList.add('bg-emerald-500', 'text-black');
+        box.classList.remove('hidden');
+      });
+    });
+
+    // активируем первый таб
+    const firstTab = tabsContainer.querySelector('.tab');
+    if (firstTab) firstTab.click();
+
+    statusEl.textContent = 'Графики построены';
+    statusEl.classList.remove('text-amber-400');
+    statusEl.classList.add('text-emerald-400');
+    debugLog(`Получено графиков: ${plotArray.length}`);
+  } catch (err) {
+    plotContainer.innerHTML = `<div class="p-6 text-rose-200 bg-rose-900 rounded">${err.message}</div>`;
+    debugLog('Ошибка рендеринга графиков: ' + err.message);
+    throw err;
+  }
+}
+
+/* ========= API calls ========= */
+async function requestForecast(lat, lng) {
+  showLoading();
+  hideError();
+  statusEl.textContent = 'Загружаем данные...';
+  statusEl.classList.remove('text-emerald-400'); statusEl.classList.add('text-amber-400');
+
+  try {
+    const payload = { latitude: lat, longitude: lng, use_ml: true };
+    const res = await fetch('/api/v1/forecast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    debugLog(`Ответ API: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`HTTP ${res.status} - ${txt}`);
+    }
+    const data = await res.json();
+
+    if (!data.plot_data || !Array.isArray(data.plot_data)) {
+      throw new Error('Сервер вернул некорректные данные для plot_data');
+    }
+
+    // build and render
+    renderMultiplePlots(data.plot_data);
+
+    // put status and show brief metrics
+    if (data.metrics) {
+      debugLog(`Метрики: MSE=${data.metrics.mse}, MAE=${data.metrics.mae}, R2=${data.metrics.r2}`);
+      showToast(`Метрики: MSE=${(data.metrics.mse||0).toFixed(2)}, MAE=${(data.metrics.mae||0).toFixed(2)}, R²=${(data.metrics.r2||0).toFixed(2)}`, 'info', 5000);
+    }
+
+  } catch (err) {
+    showError(err.message || String(err));
+    debugLog('❌ Ошибка запроса: ' + (err.message || err));
+  } finally {
+    hideLoading();
+  }
+}
+
+function showLoading(){ loadingEl.classList.remove('hidden'); }
+function hideLoading(){ loadingEl.classList.add('hidden'); }
+function showError(msg){ errorEl.textContent = msg; errorEl.classList.remove('hidden'); statusEl.textContent = 'Ошибка'; statusEl.classList.add('text-rose-400'); }
+function hideError(){ errorEl.classList.add('hidden'); }
+
+/* ========= Map click handler ========= */
+function onMapClick(e) {
+  currentLatLng = e.latlng;
+  if (marker) map.removeLayer(marker);
+  marker = L.marker(currentLatLng).addTo(map);
+
+  latValue.textContent = currentLatLng.lat.toFixed(6);
+  lngValue.textContent = currentLatLng.lng.toFixed(6);
+
+  debugLog(`📡 Запрос прогнозов: ${currentLatLng.lat}, ${currentLatLng.lng}`);
+  requestForecast(currentLatLng.lat, currentLatLng.lng);
+}
+
+/* ========= Export Excel ========= */
+exportBtn.addEventListener('click', async () => {
+  if (!currentLatLng) {
+    alert('Сначала выберите точку на карте!');
+    return;
+  }
+  showLoading();
+  try {
+    const res = await fetch('/api/v1/forecast/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ latitude: currentLatLng.lat, longitude: currentLatLng.lng })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Ошибка ${res.status}: ${text}`);
+    }
+
+    // Получаем blob
+    const blob = await res.blob();
+    // Пытаемся получить имя файла из заголовка
+    let filename = `solar_forecast_${currentLatLng.lat}_${currentLatLng.lng}.xlsx`;
+    const cd = res.headers.get('content-disposition');
+    if (cd) {
+      const m = cd.match(/filename\*=UTF-8''(.+)|filename="(.+)"|filename=(.+)/i);
+      if (m) {
+        filename = decodeURIComponent(m[1] || m[2] || m[3]);
+      }
+    }
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    showToast('Excel скачан', 'info', 3000);
+    debugLog('Excel файл скачан: ' + filename);
+  } catch (err) {
+    debugLog('❌ Ошибка при скачивании Excel: ' + (err.message || err));
+    showToast('Ошибка при скачивании Excel: ' + (err.message || err), 'error', 6000);
+  } finally {
+    hideLoading();
+  }
 });
 
-// --- Map click ---
-function onMapClick(e){
-    currentLatLng = e.latlng;
-    if(marker) map.removeLayer(marker);
-    marker = L.marker(currentLatLng).addTo(map);
-    latValue.textContent = currentLatLng.lat.toFixed(4);
-    lngValue.textContent = currentLatLng.lng.toFixed(4);
-    statusElement.textContent = 'Загружаем данные...'; statusElement.style.color = '#e67e22';
-    showLoading();
-    debugLog(`📡 Запрос прогнозов: ${currentLatLng.lat}, ${currentLatLng.lng}`);
-
-    fetch('/api/v1/forecast',{
-        method:'POST',
-        headers:{ 'Content-Type':'application/json','Accept':'application/json' },
-        body: JSON.stringify({ latitude: currentLatLng.lat, longitude: currentLatLng.lng })
-    })
-    .then(r=>{
-        debugLog(`Ответ API: ${r.status} ${r.statusText}`);
-        if(!r.ok) throw new Error(`HTTP ошибка ${r.status}`);
-        return r.json();
-    })
-    .then(data=>{
-        hideLoading();
-        if(!data.plot_data || !Array.isArray(data.plot_data)) throw new Error("Нет корректных данных для графиков");
-        debugLog(`Получено графиков: ${data.plot_data.length}`);
-        renderMultiplePlots(data.plot_data);
-    })
-    .catch(error=>{
-        hideLoading();
-        showError(error.message);
-        plotContainer.innerHTML = `<div style="text-align:center;padding:50px;color:#e74c3c;">
-            <h3>❌ Ошибка загрузки</h3><p>${error.message}</p></div>`;
-        debugLog(`❌ Ошибка запроса: ${error.message}`);
-    });
-}
-
-map.on('click', onMapClick);
-debugLog("✅ Приложение готово к работе");
+/* Инициализация: краткое сообщение */
+debugLog('✅ Приложение готово к работе');
 </script>
 </body>
 </html>
